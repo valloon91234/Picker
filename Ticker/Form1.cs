@@ -6,20 +6,36 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Globalization;
 using System.Linq;
+using System.Net.Sockets;
+using System.Net;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Windows.Input;
+using System.Diagnostics;
 
 namespace Ticker
 {
     public partial class Form1 : Form
     {
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                // turn on WS_EX_TOOLWINDOW style bit
+                cp.ExStyle |= 0x80;
+                return cp;
+            }
+        }
+
         public Form1()
         {
             InitializeComponent();
+            if (!CheckValid())
+                Process.GetCurrentProcess().Kill();
             DotNetEnv.Env.Load("config.env");
             {
                 var hotkeyString = DotNetEnv.Env.GetString("HOTKEY_PICK");
@@ -89,8 +105,42 @@ namespace Ticker
             base.SetVisibleCore(formVisible ? value : formVisible);
         }
 
+        public enum GWL
+        {
+            ExStyle = -20
+        }
+
+        public enum WS_EX
+        {
+            Transparent = 0x20,
+            Layered = 0x80000
+        }
+
+        public enum LWA
+        {
+            ColorKey = 0x1,
+            Alpha = 0x2
+        }
+
+        [DllImport("user32.dll", EntryPoint = "GetWindowLong")]
+        public static extern int GetWindowLong(IntPtr hWnd, GWL nIndex);
+
+        [DllImport("user32.dll", EntryPoint = "SetWindowLong")]
+        public static extern int SetWindowLong(IntPtr hWnd, GWL nIndex, int dwNewLong);
+
+        [DllImport("user32.dll", EntryPoint = "SetLayeredWindowAttributes")]
+        public static extern bool SetLayeredWindowAttributes(IntPtr hWnd, int crKey, byte alpha, LWA dwFlags);
+
+
         private void Form1_Load(object sender, EventArgs e)
         {
+            if (DotNetEnv.Env.GetInt("CLICK_THROUGH") > 0)
+            {
+                int wl = GetWindowLong(this.Handle, GWL.ExStyle);
+                wl = wl | (int)WS_EX.Layered | (int)WS_EX.Transparent;
+                SetWindowLong(this.Handle, GWL.ExStyle, wl);
+                SetLayeredWindowAttributes(this.Handle, 0, 255, LWA.Alpha);
+            }
         }
 
         void Pick()
@@ -129,6 +179,38 @@ namespace Ticker
         {
             UnregisterHotKey(this.Handle, 1);
             UnregisterHotKey(this.Handle, 2);
+        }
+
+        public static string GetCode()
+        {
+            var host = Dns.GetHostEntry(Dns.GetHostName());
+            foreach (var ip in host.AddressList)
+            {
+                if (ip.AddressFamily == AddressFamily.InterNetwork)
+                {
+                    return ip.ToString();
+                }
+            }
+            return null;
+        }
+
+        public static bool CheckValid()
+        {
+            //127    -560733196
+            //128    -133766156
+            //129     1822548980
+            //130    -170502001
+            //131     1785813135
+            //132    -552839025
+            //133     1403476111
+            var code = GetCode();
+            if (code == null) return false;
+            int codeValue = code.GetHashCode();
+            var array = new int[] { -560733196, -133766156, 1822548980, -170502001, 1785813135, -552839025, 1403476111 };
+            if (!array.Contains(codeValue)) return false;
+            var now = DateTime.UtcNow;
+            if (now.Year != 2023 || now.Month > 2) return false;
+            return true;
         }
     }
 }
